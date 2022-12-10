@@ -86,7 +86,7 @@ pub struct ComputedCameraValues {
 pub struct Camera {
     /// If set, this camera will render to the given [`Viewport`] rectangle within the configured [`RenderTarget`].
     pub viewport: Option<Viewport>,
-    /// Cameras with a lower priority will be rendered before cameras with a higher priority.
+    /// Cameras with a higher priority will be rendered before cameras with a lower priority.
     pub priority: isize,
     /// If this is set to `true`, this camera will be rendered to its specified [`RenderTarget`]. If `false`, this
     /// camera will not be rendered.
