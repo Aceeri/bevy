@@ -53,7 +53,7 @@ impl Plugin for WinitPlugin {
         // the renderer.
         // And for ios and macos, we should not create window early, all ui related code should be executed inside
         // UIApplicationMain/NSApplicationMain.
-        #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "macos")))]
+        //#[cfg(not(any(target_os = "android", target_os = "ios", target_os = "macos")))]
         handle_create_window_events(&mut app.world, &event_loop, &mut create_window_reader.0);
         app.insert_resource(create_window_reader)
             .insert_non_send_resource(event_loop);
