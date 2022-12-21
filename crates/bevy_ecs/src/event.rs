@@ -153,6 +153,14 @@ impl<E: Event> Events<E> {
     }
 }
 
+impl<'a, 'w, 's, E: Event> IntoIterator for &'a mut EventReader<'w, 's, E> {
+    type Item = &'a E;
+    type IntoIter = ManualEventIterator<'a, E>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+ 
 #[derive(Debug)]
 struct EventSequence<E: Event> {
     events: Vec<EventInstance<E>>,
