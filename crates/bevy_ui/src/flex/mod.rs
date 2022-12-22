@@ -5,7 +5,8 @@ use bevy_ecs::{
     entity::Entity,
     event::EventReader,
     query::{Changed, ReadOnlyWorldQuery, With, Without},
-    system::{Query, RemovedComponents, Res, ResMut, Resource},
+    system::{Query, Res, ResMut, Resource},
+    removal_detection::RemovedComponents,
 };
 use bevy_hierarchy::{Children, Parent};
 use bevy_log::warn;
@@ -229,9 +230,9 @@ pub fn flex_node_system(
         (With<Node>, Changed<CalculatedSize>),
     >,
     children_query: Query<(Entity, &Children), (With<Node>, Changed<Children>)>,
-    removed_children: RemovedComponents<Children>,
+    mut removed_children: RemovedComponents<Children>,
     mut node_transform_query: Query<(Entity, &mut Node, &mut Transform, Option<&Parent>)>,
-    removed_nodes: RemovedComponents<Node>,
+    mut removed_nodes: RemovedComponents<Node>,
 ) {
     // update window root nodes
     for window in windows.iter() {
@@ -269,7 +270,7 @@ pub fn flex_node_system(
     }
 
     // clean up removed nodes
-    flex_surface.remove_entities(&removed_nodes);
+    flex_surface.remove_entities(removed_nodes.iter());
 
     // update window children (for now assuming all Nodes live in the primary window)
     if let Some(primary_window) = windows.get_primary() {
@@ -277,7 +278,7 @@ pub fn flex_node_system(
     }
 
     // update and remove children
-    for entity in &removed_children {
+    for entity in removed_children.iter() {
         flex_surface.try_remove_children(entity);
     }
     for (entity, children) in &children_query {

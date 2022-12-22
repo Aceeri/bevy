@@ -9,6 +9,7 @@ use crate::{
     entity::{Entities, Entity, EntityLocation},
     storage::{Column, ComponentSparseSet, SparseSet, Storages, TableRow},
     world::{Mut, World},
+    removal_detection::RemovedComponentEvents,
 };
 use bevy_ptr::{OwningPtr, Ptr};
 use bevy_utils::tracing::debug;
@@ -421,7 +422,7 @@ impl<'w> EntityMut<'w> {
                     components,
                     storages,
                     old_archetype,
-                    removed_components,
+                    &mut *removed_components,
                     component_id,
                     entity,
                     old_location,
@@ -541,8 +542,7 @@ impl<'w> EntityMut<'w> {
         for component_id in bundle_info.component_ids.iter().cloned() {
             if old_archetype.contains(component_id) {
                 removed_components
-                    .get_or_insert_with(component_id, Vec::new)
-                    .push(entity);
+                    .send(component_id, entity);
 
                 // Make sure to drop components stored in sparse sets.
                 // Dense components are dropped later in `move_to_and_drop_missing_unchecked`.
@@ -581,13 +581,11 @@ impl<'w> EntityMut<'w> {
             .expect("entity should exist at this point.");
         let table_row;
         let moved_entity;
+
         {
             let archetype = &mut world.archetypes[location.archetype_id];
             for component_id in archetype.components() {
-                let removed_components = world
-                    .removed_components
-                    .get_or_insert_with(component_id, Vec::new);
-                removed_components.push(self.entity);
+                world.removed_components.send(component_id, self.entity);
             }
             let remove_result = archetype.swap_remove(location.archetype_row);
             if let Some(swapped_entity) = remove_result.swapped_entity {
@@ -811,14 +809,13 @@ unsafe fn take_component<'a>(
     components: &Components,
     storages: &'a mut Storages,
     archetype: &Archetype,
-    removed_components: &mut SparseSet<ComponentId, Vec<Entity>>,
+    removed_components: &mut RemovedComponentEvents,
     component_id: ComponentId,
     entity: Entity,
     location: EntityLocation,
 ) -> OwningPtr<'a> {
     let component_info = components.get_info_unchecked(component_id);
-    let removed_components = removed_components.get_or_insert_with(component_id, Vec::new);
-    removed_components.push(entity);
+    removed_components.send(component_id, entity);
     match component_info.storage_type() {
         StorageType::Table => {
             let table = &mut storages.tables[archetype.table_id()];

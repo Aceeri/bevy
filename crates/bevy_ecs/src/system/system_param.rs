@@ -5,10 +5,13 @@ use crate::{
     change_detection::Ticks,
     component::{Component, ComponentId, ComponentTicks, Components, Tick},
     entity::{Entities, Entity},
+    event::{Events, ManualEventReader},
     query::{
         Access, FilteredAccess, FilteredAccessSet, QueryState, ReadOnlyWorldQuery, WorldQuery,
     },
+    storage::SparseSet,
     system::{CommandQueue, Commands, Query, SystemMeta},
+    removal_detection::RemovedComponentEvents,
     world::{FromWorld, World},
 };
 pub use bevy_ecs_macros::Resource;
@@ -809,103 +812,6 @@ unsafe impl<T: FromWorld + Send + 'static> SystemParamState for LocalState<T> {
         Local(state.0.get())
     }
 }
-
-/// A [`SystemParam`] that grants access to the entities that had their `T` [`Component`] removed.
-///
-/// Note that this does not allow you to see which data existed before removal.
-/// If you need this, you will need to track the component data value on your own,
-/// using a regularly scheduled system that requests `Query<(Entity, &T), Changed<T>>`
-/// and stores the data somewhere safe to later cross-reference.
-///
-/// If you are using `bevy_ecs` as a standalone crate,
-/// note that the `RemovedComponents` list will not be automatically cleared for you,
-/// and will need to be manually flushed using [`World::clear_trackers`]
-///
-/// For users of `bevy` and `bevy_app`, this is automatically done in `bevy_app::App::update`.
-/// For the main world, [`World::clear_trackers`] is run after the main schedule is run and after
-/// `SubApp`'s have run.
-///
-/// # Examples
-///
-/// Basic usage:
-///
-/// ```
-/// # use bevy_ecs::component::Component;
-/// # use bevy_ecs::system::IntoSystem;
-/// # use bevy_ecs::system::RemovedComponents;
-/// #
-/// # #[derive(Component)]
-/// # struct MyComponent;
-///
-/// fn react_on_removal(removed: RemovedComponents<MyComponent>) {
-///     removed.iter().for_each(|removed_entity| println!("{:?}", removed_entity));
-/// }
-///
-/// # bevy_ecs::system::assert_is_system(react_on_removal);
-/// ```
-pub struct RemovedComponents<'a, T: Component> {
-    world: &'a World,
-    component_id: ComponentId,
-    marker: PhantomData<T>,
-}
-
-impl<'a, T: Component> RemovedComponents<'a, T> {
-    /// Returns an iterator over the entities that had their `T` [`Component`] removed.
-    pub fn iter(&self) -> std::iter::Cloned<std::slice::Iter<'_, Entity>> {
-        self.world.removed_with_id(self.component_id)
-    }
-}
-
-impl<'a, T: Component> IntoIterator for &'a RemovedComponents<'a, T> {
-    type Item = Entity;
-    type IntoIter = std::iter::Cloned<std::slice::Iter<'a, Entity>>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-// SAFETY: Only reads World components
-unsafe impl<'a, T: Component> ReadOnlySystemParam for RemovedComponents<'a, T> {}
-
-/// The [`SystemParamState`] of [`RemovedComponents<T>`].
-#[doc(hidden)]
-pub struct RemovedComponentsState<T> {
-    component_id: ComponentId,
-    marker: PhantomData<T>,
-}
-
-impl<'a, T: Component> SystemParam for RemovedComponents<'a, T> {
-    type State = RemovedComponentsState<T>;
-}
-
-// SAFETY: no component access. removed component entity collections can be read in parallel and are
-// never mutably borrowed during system execution
-unsafe impl<T: Component> SystemParamState for RemovedComponentsState<T> {
-    type Item<'w, 's> = RemovedComponents<'w, T>;
-
-    fn init(world: &mut World, _system_meta: &mut SystemMeta) -> Self {
-        Self {
-            component_id: world.init_component::<T>(),
-            marker: PhantomData,
-        }
-    }
-
-    #[inline]
-    unsafe fn get_param<'w, 's>(
-        state: &'s mut Self,
-        _system_meta: &SystemMeta,
-        world: &'w World,
-        _change_tick: u32,
-    ) -> Self::Item<'w, 's> {
-        RemovedComponents {
-            world,
-            component_id: state.component_id,
-            marker: PhantomData,
-        }
-    }
-}
-
 /// Shared borrow of a non-[`Send`] resource.
 ///
 /// Only `Send` resources may be accessed with the [`Res`] [`SystemParam`]. In case that the
@@ -1305,6 +1211,107 @@ unsafe impl SystemParamState for BundlesState {
         world.bundles()
     }
 }
+
+impl<'a> SystemParam for &'a RemovedComponentEvents {
+    type State = RemovedComponentEventsState;
+}
+
+// SAFETY: Only reads World components
+unsafe impl<'a> ReadOnlySystemParam for &'a RemovedComponentEvents {}
+
+/// The [`SystemParamState`] of [`RemovedComponentEvents`].
+#[doc(hidden)]
+pub struct RemovedComponentEventsState;
+
+// SAFETY: no component value access
+unsafe impl SystemParamState for RemovedComponentEventsState {
+    type Item<'w, 's> = &'w RemovedComponentEvents;
+
+    fn init(_world: &mut World, _system_meta: &mut SystemMeta) -> Self {
+        Self
+    }
+
+    #[inline]
+    unsafe fn get_param<'w, 's>(
+        _state: &'s mut Self,
+        _system_meta: &SystemMeta,
+        world: &'w World,
+        _change_tick: u32,
+    ) -> Self::Item<'w, 's> {
+        world.removed_components()
+    }
+}
+
+
+/// A [`SystemParam`] that converts a generic component type into a concrete id.
+#[derive(Debug)]
+pub struct ToComponentId<T: Component> {
+    component_id: ComponentId,
+    phantom: PhantomData<T>
+}
+
+impl<T: Component> Copy for ToComponentId<T> {}
+impl<T: Component> Clone for ToComponentId<T> {
+    fn clone(&self) -> Self {
+        Self {
+            component_id: self.component_id,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: Component> ToComponentId<T> {
+    /// Returns the current [`World`] change tick seen by the system.
+    #[inline]
+    pub fn id(&self) -> ComponentId {
+        self.component_id
+    }
+}
+
+impl<T: Component> Into<ComponentId> for ToComponentId<T> {
+    fn into(self) -> ComponentId {
+        self.id()
+    }
+}
+
+// SAFETY: Only reads component id from world
+unsafe impl<T: Component> ReadOnlySystemParam for ToComponentId<T> {}
+
+impl<T: Component> SystemParam for ToComponentId<T> {
+    type State = ToComponentIdState<T>;
+}
+
+/// The [`SystemParamState`] of [`ToComponentId`].
+#[doc(hidden)]
+pub struct ToComponentIdState<T> {
+    component_id: ComponentId,
+    phantom: PhantomData<T>
+}
+
+// SAFETY: `ToComponentIdState` doesn't require any world access
+unsafe impl<T: Component> SystemParamState for ToComponentIdState<T> {
+    type Item<'w, 's> = ToComponentId<T>;
+
+    fn init(world: &mut World, _system_meta: &mut SystemMeta) -> Self {
+        Self {
+            component_id: world.init_component::<T>(),
+            phantom: PhantomData,
+        }
+    }
+
+    unsafe fn get_param<'w, 's>(
+        state: &'s mut Self,
+        _system_meta: &SystemMeta,
+        _world: &'w World,
+        _change_tick: u32,
+    ) -> Self::Item<'w, 's> {
+        ToComponentId {
+            component_id: state.component_id,
+            phantom: PhantomData,
+        }
+    }
+}
+
 
 /// A [`SystemParam`] that reads the previous and current change ticks of the system.
 ///

@@ -117,8 +117,9 @@ mod tests {
         schedule::{Schedule, Stage, SystemStage},
         system::{
             Commands, IntoSystem, Local, NonSend, NonSendMut, ParamSet, Query, QueryComponentError,
-            RemovedComponents, Res, ResMut, Resource, System, SystemState,
+            Res, ResMut, Resource, System, SystemState,
         },
+        removal_detection::RemovedComponents,
         world::{FromWorld, World},
     };
 
@@ -577,7 +578,7 @@ mod tests {
         world.entity_mut(spurious_entity).despawn();
 
         fn validate_despawn(
-            removed_i32: RemovedComponents<W<i32>>,
+            mut removed_i32: RemovedComponents<W<i32>>,
             despawned: Res<Despawned>,
             mut n_systems: ResMut<NSystems>,
         ) {
@@ -602,7 +603,7 @@ mod tests {
         world.entity_mut(entity_to_remove_w_from).remove::<W<i32>>();
 
         fn validate_remove(
-            removed_i32: RemovedComponents<W<i32>>,
+            mut removed_i32: RemovedComponents<W<i32>>,
             removed: Res<Removed>,
             mut n_systems: ResMut<NSystems>,
         ) {

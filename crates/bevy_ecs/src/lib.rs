@@ -13,6 +13,7 @@ pub mod event;
 pub mod query;
 #[cfg(feature = "bevy_reflect")]
 pub mod reflect;
+pub mod removal_detection;
 pub mod schedule;
 pub mod storage;
 pub mod system;
@@ -29,6 +30,7 @@ pub mod prelude {
     pub use crate::{
         bundle::Bundle,
         change_detection::DetectChanges,
+        removal_detection::RemovedComponents,
         component::Component,
         entity::Entity,
         event::{EventReader, EventWriter, Events},
@@ -41,7 +43,7 @@ pub mod prelude {
             adapter as system_adapter,
             adapter::{dbg, error, ignore, info, unwrap, warn},
             Commands, In, IntoPipeSystem, IntoSystem, Local, NonSend, NonSendMut, ParallelCommands,
-            ParamSet, Query, RemovedComponents, Res, ResMut, Resource, System, SystemParamFunction,
+            ParamSet, Query, Res, ResMut, Resource, System, SystemParamFunction,
         },
         world::{FromWorld, Mut, World},
     };

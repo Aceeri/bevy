@@ -337,9 +337,9 @@ impl<E: Event> Default for ManualEventReader<E> {
 #[allow(clippy::len_without_is_empty)] // Check fails since the is_empty implementation has a signature other than `(&self) -> bool`
 impl<E: Event> ManualEventReader<E> {
     /// See [`EventReader::iter`]
-    pub fn iter<'a>(
+    pub fn iter<'a, 'b: 'a>(
         &'a mut self,
-        events: &'a Events<E>,
+        events: &'b Events<E>,
     ) -> impl DoubleEndedIterator<Item = &'a E> + ExactSizeIterator<Item = &'a E> {
         self.iter_with_id(events).map(|(e, _)| e)
     }
