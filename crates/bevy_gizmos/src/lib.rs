@@ -35,7 +35,7 @@ pub mod prelude {
     pub use crate::{gizmos::Gizmos, AabbGizmo, AabbGizmoConfig, GizmoConfig};
 }
 
-use bevy_app::{FixedUpdate, Last, Plugin, PostUpdate};
+use bevy_app::{RunFixedUpdateLoop, Last, Plugin, PostUpdate};
 use bevy_asset::{load_internal_asset, Asset, AssetApp, Assets, Handle};
 use bevy_core::cast_slice;
 use bevy_ecs::{
@@ -71,8 +71,9 @@ use bevy_transform::{
     components::{GlobalTransform, Transform},
     TransformSystem,
 };
+use bevy_time::fixed_timestep::run_fixed_update_schedule;
 
-use gizmos::{GizmoStorages, Gizmos};
+use gizmos::{GizmoStorage, Gizmos, GizmoContext};
 use std::mem;
 
 const LINE_SHADER_HANDLE: Handle<Shader> = Handle::weak_from_u128(7414812689238026784);
@@ -89,7 +90,8 @@ impl Plugin for GizmoPlugin {
             .add_plugins(RenderAssetPlugin::<LineGizmo>::default())
             .init_resource::<LineGizmoHandles>()
             .init_resource::<GizmoConfig>()
-            .init_resource::<GizmoStorages>()
+            .init_resource::<GizmoStorage>()
+            .init_resource::<GizmoContext>()
             .add_systems(Last, update_gizmo_meshes)
             .add_systems(
                 PostUpdate,
@@ -99,9 +101,8 @@ impl Plugin for GizmoPlugin {
                 )
                     .after(TransformSystem::TransformPropagate),
             )
-            // Ensure gizmos from previous fixed update are cleaned up if no other system
-            // accesses `Gizmos` during fixed update any more
-            .add_systems(FixedUpdate, |_: Gizmos| ());
+            .add_systems(RunFixedUpdateLoop, fixed_gizmo_context.before(run_fixed_update_schedule))
+            .add_systems(RunFixedUpdateLoop, main_gizmo_context.after(run_fixed_update_schedule));
 
         let Ok(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
@@ -282,22 +283,11 @@ struct LineGizmoHandles {
 fn update_gizmo_meshes(
     mut line_gizmos: ResMut<Assets<LineGizmo>>,
     mut handles: ResMut<LineGizmoHandles>,
-    mut storages: ResMut<GizmoStorages>,
+    mut storages: ResMut<GizmoStorage>,
 ) {
+    storages.propagate();
     // Combine gizmos for this frame (which get cleared here) with the ones from the last fixed update (which get cleared during system buffer application)
     let mut storage = mem::take(&mut storages.frame);
-    storage
-        .list_positions
-        .extend_from_slice(&storages.fixed_update.list_positions);
-    storage
-        .list_colors
-        .extend_from_slice(&storages.fixed_update.list_colors);
-    storage
-        .strip_positions
-        .extend_from_slice(&storages.fixed_update.strip_positions);
-    storage
-        .strip_colors
-        .extend_from_slice(&storages.fixed_update.strip_colors);
 
     if storage.list_positions.is_empty() {
         handles.list = None;
@@ -579,4 +569,13 @@ fn line_gizmo_vertex_buffer_layouts(strip: bool) -> Vec<VertexBufferLayout> {
 
         vec![position_layout, color_layout]
     }
+}
+
+fn fixed_gizmo_context(mut context: ResMut<GizmoContext>, mut storages: ResMut<GizmoStorage>) {
+    *context = GizmoContext::Fixed;
+    storages.fixed_update.clear();
+}
+
+fn main_gizmo_context(mut context: ResMut<GizmoContext>) {
+    *context = GizmoContext::Main;
 }

@@ -2,7 +2,6 @@
 
 use std::{f32::consts::TAU, iter};
 
-use bevy_app::FixedUpdateScheduleIsCurrentlyRunning;
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     component::Tick,
@@ -20,18 +19,52 @@ type ColorItem = [f32; 4];
 const DEFAULT_CIRCLE_SEGMENTS: usize = 32;
 
 #[derive(Resource, Default)]
-pub(crate) struct GizmoStorages {
-    pub frame: GizmoStorage,
-    pub fixed_update_tick: u64,
-    pub fixed_update: GizmoStorage,
+pub(crate) struct GizmoStorage {
+    pub frame: GizmoBuffer,
+    pub fixed_update: GizmoBuffer,
 }
 
-#[derive(Default)]
-pub(crate) struct GizmoStorage {
-    pub list_positions: Vec<PositionItem>,
-    pub list_colors: Vec<ColorItem>,
-    pub strip_positions: Vec<PositionItem>,
-    pub strip_colors: Vec<ColorItem>,
+impl GizmoStorage {
+    /// Propagate the non-frame gizmo buffers to the frame buffer.
+    pub fn propagate(&mut self) {
+        self.frame.submit_buffer(&self.fixed_update);
+    }
+}
+
+/// Which `GizmoBuffer` should we use in this context.
+#[derive(Resource, Default, Copy, Clone)]
+pub enum GizmoContext {
+    /// Main schedule context.
+    #[default]
+    Main,
+    /// `FixedUpdate` schedule context.
+    Fixed,
+}
+
+impl GizmoBuffer {
+    /// Append the other `GizmoBuffer` into this one, while clearing the other buffer.
+    pub fn append(&mut self, other: &mut Self) {
+        self
+            .list_positions
+            .append(&mut other.list_positions);
+        self.list_colors.append(&mut other.list_colors);
+        self
+            .strip_positions
+            .append(&mut other.strip_positions);
+        self.strip_colors.append(&mut other.strip_colors);
+    }
+
+    /// Clear this `GizmoBuffer`.
+    pub fn clear(&mut self) {
+        self
+            .list_positions
+            .clear();
+        self.list_colors.clear();
+        self
+            .strip_positions
+            .clear();
+        self.strip_colors.clear();
+    }
 }
 
 /// A [`SystemParam`](bevy_ecs::system::SystemParam) for drawing gizmos.
@@ -47,10 +80,10 @@ pub struct Gizmos<'s> {
 /// Buffer in which gizmos are recorded, usually accessed via the [`Gizmos SystemParam`](Gizmos).
 #[derive(Default)]
 pub struct GizmoBuffer {
-    list_positions: Vec<PositionItem>,
-    list_colors: Vec<ColorItem>,
-    strip_positions: Vec<PositionItem>,
-    strip_colors: Vec<ColorItem>,
+    pub list_positions: Vec<PositionItem>,
+    pub list_colors: Vec<ColorItem>,
+    pub strip_positions: Vec<PositionItem>,
+    pub strip_colors: Vec<ColorItem>,
 }
 
 // Wrap to keep State hidden
@@ -58,8 +91,6 @@ const _: () = {
     #[derive(Default)]
     pub struct State {
         buffer: GizmoBuffer,
-        /// Which fixed update tick this belongs to, `None` if this isn't from a fixed update.
-        fixed_time_update: Option<u64>,
     }
 
     // SAFETY: Only local state is accessed.
@@ -72,41 +103,23 @@ const _: () = {
         }
 
         fn apply(state: &mut Self::State, _system_meta: &SystemMeta, world: &mut World) {
-            let mut storages = world.resource_mut::<GizmoStorages>();
+            let context = world.resource::<GizmoContext>().clone();
+            let mut storages = world.resource_mut::<GizmoStorage>();
 
-            let storage = if let Some(tick) = state.fixed_time_update {
-                // If a new fixed update has begun, clear gizmos from previous fixed update
-                if storages.fixed_update_tick < tick {
-                    storages.fixed_update_tick = tick;
-                    storages.fixed_update.list_positions.clear();
-                    storages.fixed_update.list_colors.clear();
-                    storages.fixed_update.strip_positions.clear();
-                    storages.fixed_update.strip_colors.clear();
-                }
-                &mut storages.fixed_update
-            } else {
-                &mut storages.frame
+            let storage = match context {
+                GizmoContext::Main => &mut storages.frame,
+                GizmoContext::Fixed => &mut storages.fixed_update,
             };
 
-            storage
-                .list_positions
-                .append(&mut state.buffer.list_positions);
-            storage.list_colors.append(&mut state.buffer.list_colors);
-            storage
-                .strip_positions
-                .append(&mut state.buffer.strip_positions);
-            storage.strip_colors.append(&mut state.buffer.strip_colors);
+            storage.append(&mut state.buffer);
         }
 
         unsafe fn get_param<'w, 's>(
             state: &'s mut Self::State,
             _system_meta: &SystemMeta,
-            world: UnsafeWorldCell<'w>,
+            _world: UnsafeWorldCell<'w>,
             _change_tick: Tick,
         ) -> Self::Item<'w, 's> {
-            state.fixed_time_update = world
-                .get_resource::<FixedUpdateScheduleIsCurrentlyRunning>()
-                .map(|current| current.update);
             Gizmos {
                 buffer: &mut state.buffer,
             }

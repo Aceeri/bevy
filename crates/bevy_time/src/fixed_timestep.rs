@@ -22,7 +22,7 @@
 //! variants for game simulation, but rather use the value of [`FixedTime`] instead.
 
 use crate::Time;
-use bevy_app::{FixedUpdate, FixedUpdateScheduleIsCurrentlyRunning};
+use bevy_app::FixedUpdate;
 use bevy_ecs::{system::Resource, world::World};
 use bevy_utils::Duration;
 use thiserror::Error;
@@ -38,7 +38,6 @@ use thiserror::Error;
 #[derive(Resource, Debug)]
 pub struct FixedTime {
     accumulated: Duration,
-    total_ticks: u64,
     /// The amount of time spanned by each fixed update.
     /// Defaults to 1/60th of a second.
     ///
@@ -52,7 +51,6 @@ impl FixedTime {
         FixedTime {
             accumulated: Duration::ZERO,
             period,
-            total_ticks: 0,
         }
     }
 
@@ -61,7 +59,6 @@ impl FixedTime {
         FixedTime {
             accumulated: Duration::ZERO,
             period: Duration::from_secs_f32(period),
-            total_ticks: 0,
         }
     }
 
@@ -80,11 +77,6 @@ impl FixedTime {
         self.accumulated
     }
 
-    /// Returns how often this has expended a period of time.
-    pub fn times_expended(&self) -> u64 {
-        self.total_ticks
-    }
-
     /// Attempts to advance by a single period. This will return [`FixedUpdateError`] if there is not enough
     /// accumulated time -- in other words, if advancing time would put the fixed update schedule
     /// ahead of the main schedule.
@@ -93,7 +85,6 @@ impl FixedTime {
     pub fn expend(&mut self) -> Result<(), FixedUpdateError> {
         if let Some(new_value) = self.accumulated.checked_sub(self.period) {
             self.accumulated = new_value;
-            self.total_ticks += 1;
             Ok(())
         } else {
             Err(FixedUpdateError::NotEnoughTime {
@@ -109,7 +100,6 @@ impl Default for FixedTime {
         FixedTime {
             accumulated: Duration::ZERO,
             period: Duration::from_secs_f32(1. / 60.),
-            total_ticks: 0,
         }
     }
 }
@@ -131,10 +121,6 @@ pub enum FixedUpdateError {
 ///
 /// For more information, see the [module-level documentation](self).
 pub fn run_fixed_update_schedule(world: &mut World) {
-    world.insert_resource(FixedUpdateScheduleIsCurrentlyRunning {
-        update: world.resource::<FixedTime>().times_expended(),
-    });
-
     // Tick the time
     let delta_time = world.resource::<Time>().delta();
     let mut fixed_time = world.resource_mut::<FixedTime>();
@@ -146,8 +132,6 @@ pub fn run_fixed_update_schedule(world: &mut World) {
             schedule.run(world);
         }
     });
-
-    world.remove_resource::<FixedUpdateScheduleIsCurrentlyRunning>();
 }
 
 #[cfg(test)]
